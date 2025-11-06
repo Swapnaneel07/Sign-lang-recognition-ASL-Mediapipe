@@ -146,6 +146,14 @@ When you run `train_classifier.py`, the script now writes a `reports/` directory
 
 There is a simple viewer at `reports/index.html` that will display the confusion matrix image and load the text report (works when served or opened in a browser that allows file access). Use this to quickly inspect results after training.
 
+### Quick preview (embedded)
+
+Below is a small inline preview of the confusion matrix generated during the last training run. To keep the `README.md` file size reasonable the README references a thumbnail image stored in `reports/` instead of embedding the full PNG as a data URI.
+
+![Confusion matrix preview](reports/confusion_matrix_thumb.png)
+
+If you explicitly want the image embedded as a data URI inside this README, I created a base64-encoded thumbnail at `reports/confusion_matrix_thumb.b64`; tell me and I'll inline that data URI directly (note: this will significantly increase the README size).
+
 ## Troubleshooting
 
 - "No hand detected": Improve lighting; increase camera resolution, move hand closer to camera.

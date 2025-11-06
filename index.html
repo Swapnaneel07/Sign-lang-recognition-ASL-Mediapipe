@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASL Recognition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the confidence bar */
+        #confidence-bar {
+            width: 100%;
+            background-color: #4a5568; /* gray-700 */
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        #confidence-fill {
+            height: 1.5rem;
+            background-color: #48bb78; /* green-500 */
+            border-radius: 0.5rem;
+            transition: width 0.2s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col items-center justify-center min-h-screen font-sans p-4">
+
+    <div class="w-full max-w-6xl mx-auto">
+        <h1 class="text-4xl font-bold text-center mb-2">ASL Recognition</h1>
+        <p id="loading-text" class="text-center text-lg text-yellow-400 mb-4">Loading Models...</p>
+
+        <div class="flex justify-center space-x-4 mb-4">
+            <button id="start-btn" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 disabled:opacity-50" disabled>Start Camera</button>
+            <button id="stop-btn" class="px-6 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 hidden">Stop Camera</button>
+        </div>
+
+        <div class="flex flex-col md:flex-row justify-center items-start gap-8">
+            <!-- Video Feed -->
+            <div id="live-view" class="relative hidden w-full md:w-1/2 max-w-2xl mx-auto">
+                <video id="webcam" class="w-full h-auto rounded-lg" autoplay playsinline></video>
+                <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+            </div>
+
+            <!-- Prediction Area -->
+            <div class="w-full md:w-1/2 flex flex-col items-center justify-center text-center bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-2xl font-semibold mb-4">Prediction</h2>
+                <div id="prediction-text" class="text-8xl font-bold text-teal-300 h-28">---</div>
+                <div class="w-full mt-4">
+                    <p class="text-lg mb-2">Confidence</p>
+                    <div id="confidence-bar">
+                        <div id="confidence-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/dist/vision_bundle.js";
+
+        // --- DOM Elements ---
+        const video = document.getElementById("webcam");
+        const canvas = document.getElementById("output-canvas");
+        const ctx = canvas.getContext("2d");
+        const startBtn = document.getElementById("start-btn");
+        const stopBtn = document.getElementById("stop-btn");
+        const loadingText = document.getElementById("loading-text");
+        const liveView = document.getElementById("live-view");
+        const predictionText = document.getElementById("prediction-text");
+        const confidenceFill = document.getElementById("confidence-fill");
+
+        // --- Global Variables ---
+        let handLandmarker;
+        let classifier;
+        let predictLoopId;
+
+        // --- Main Initialization ---
+        async function main() {
+            loadingText.innerText = "Loading Classifier...";
+            await loadClassifier();
+            
+            loadingText.innerText = "Loading Hand Landmarker...";
+            await createHandLandmarker();
+
+            loadingText.innerText = "Ready";
+            startBtn.disabled = false;
+        }
+
+        async function createHandLandmarker() {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+            );
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                    delegate: "GPU",
+                },
+                runningMode: "VIDEO",
+                numHands: 1,
+            });
+        }
+
+        async function loadClassifier() {
+            try {
+                const response = await fetch('./asl_classifier_model.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${'''response.status'''}`);
+                }
+                classifier = await response.json();
+            } catch (error) {
+                console.error("Failed to load classifier:", error);
+                loadingText.innerText = "Error: Could not load classifier model.";
+            }
+        }
+        
+        // --- Webcam & Prediction Loop ---
+        async function startWebcam() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("Your browser does not support webcam access.");
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    liveView.classList.remove("hidden");
+                    startBtn.classList.add("hidden");
+                    stopBtn.classList.remove("hidden");
+                    predictWebcam();
+                });
+            } catch (error) {
+                console.error("Error accessing webcam:", error);
+                alert("Could not access webcam. Please grant permission and try again.");
+            }
+        }
+
+        function stopWebcam() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            video.srcObject = null;
+            cancelAnimationFrame(predictLoopId);
+            
+            liveView.classList.add("hidden");
+            stopBtn.classList.add("hidden");
+            startBtn.classList.remove("hidden");
+            predictionText.innerText = "---";
+            confidenceFill.style.width = "0%";
+            predictionBuffer.length = 0; // Clear buffer
+        }
+
+        async function predictWebcam() {
+            if (video.readyState < 2) {
+                predictLoopId = requestAnimationFrame(predictWebcam);
+                return;
+            }
+            
+            const results = handLandmarker.detectForVideo(video, performance.now());
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (results.landmarks && results.landmarks.length > 0) {
+                const landmarks = results.landmarks[0];
+                drawConnectors(ctx, landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 5 });
+                drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 2 });
+                
+                const features = normalizeLandmarks(landmarks);
+                if (features) {
+                    const { prediction, confidence } = predictWithRF(features);
+                    const smoothedPrediction = applySmoothing(prediction);
+                    
+                    predictionText.innerText = smoothedPrediction;
+                    if (smoothedPrediction === "---") {
+                        confidenceFill.style.width = "0%";
+                    } else {
+                        // Display confidence of the last *valid* prediction
+                        confidenceFill.style.width = `${'''Math.round(confidence * 100)'''}%`;
+                    }
+                } else {
+                     const smoothedPrediction = applySmoothing(null);
+                     predictionText.innerText = smoothedPrediction;
+                     confidenceFill.style.width = "0%";
+                }
+            } else {
+                const smoothedPrediction = applySmoothing(null);
+                predictionText.innerText = smoothedPrediction;
+                confidenceFill.style.width = "0%";
+            }
+
+            predictLoopId = requestAnimationFrame(predictWebcam);
+        }
+
+        // --- Event Listeners ---
+        startBtn.addEventListener("click", startWebcam);
+        stopBtn.addEventListener("click", stopWebcam);
+        window.addEventListener("load", main);
+
+
+        // --- Helper Functions ---
+
+        // 1. Normalization Logic
+        function normalizeLandmarks(landmarks) {
+            let coords = [];
+            for (const landmark of landmarks) {
+                coords.push(landmark.x, landmark.y, landmark.z);
+            }
+            coords = new Float32Array(coords); // 63 elements
+
+            const root = [coords[0], coords[1], coords[2]];
+            for (let i = 0; i < 21; i++) {
+                coords[i * 3]     -= root[0]; // x
+                coords[i * 3 + 1] -= root[1]; // y
+                coords[i * 3 + 2] -= root[2]; // z
+            }
+
+            const middleFingerBase = [coords[9 * 3], coords[9 * 3 + 1], coords[9 * 3 + 2]];
+            const scaleFactor = Math.sqrt(
+                middleFingerBase[0] ** 2 + middleFingerBase[1] ** 2 + middleFingerBase[2] ** 2
+            );
+            if (scaleFactor === 0) return null;
+
+            for (let i = 0; i < 63; i++) {
+                coords[i] /= scaleFactor;
+            }
+            
+            return coords; // Return the 63-element flat array
+        }
+
+        // 2. Random Forest Prediction Logic
+        function predictWithRF(features) {
+            const totalVotes = new Array(classifier.n_classes).fill(0);
+            
+            const argmax = (arr) => {
+                if (arr.length === 0) return -1;
+                let max = arr[0];
+                let maxIndex = 0;
+                for (let i = 1; i < arr.length; i++) {
+                    if (arr[i] > max) {
+                        maxIndex = i;
+                        max = arr[i];
+                    }
+                }
+                return maxIndex;
+            };
+
+            for (const tree of classifier.trees) {
+                let nodeIndex = 0;
+                while (tree.children_left[nodeIndex] !== -1) { // -1 indicates a leaf
+                    const featureIndex = tree.feature[nodeIndex];
+                    const threshold = tree.threshold[nodeIndex];
+                    if (features[featureIndex] <= threshold) {
+                        nodeIndex = tree.children_left[nodeIndex];
+                    } else {
+                        nodeIndex = tree.children_right[nodeIndex];
+                    }
+                }
+                const leafVotes = tree.value[nodeIndex][0];
+                const winningClassIndex = argmax(leafVotes);
+                totalVotes[winningClassIndex]++;
+            }
+
+            const finalPredictionIndex = argmax(totalVotes);
+            const prediction = classifier.classes[finalPredictionIndex];
+            const confidence = totalVotes[finalPredictionIndex] / classifier.trees.length;
+            
+            return { prediction, confidence };
+        }
+
+        // 3. Smoothing Logic
+        const SMOOTHING_BUFFER_SIZE = 10;
+        const predictionBuffer = [];
+
+        function applySmoothing(prediction) {
+            predictionBuffer.push(prediction);
+            if (predictionBuffer.length > SMOOTHING_BUFFER_SIZE) {
+                predictionBuffer.shift(); // Remove oldest
+            }
+            
+            const counts = {};
+            let maxCount = 0;
+            let mode = "---";
+            
+            for (const pred of predictionBuffer) {
+                if (pred === null) continue;
+                counts[pred] = (counts[pred] || 0) + 1;
+                if (counts[pred] > maxCount) {
+                    maxCount = counts[pred];
+                    mode = pred;
+                }
+            }
+            return mode;
+        }
+
+        // --- MediaPipe Drawing Utils (for canvas visualization) ---
+        // These functions are not part of the core logic but are needed to draw the hand.
+        function drawConnectors(ctx, landmarks, connections, options) {
+            ctx.beginPath();
+            ctx.strokeStyle = options.color;
+            ctx.lineWidth = options.lineWidth;
+            for (const connection of connections) {
+                const start = landmarks[connection[0]];
+                const end = landmarks[connection[1]];
+                ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
+                ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
+            }
+            ctx.stroke();
+        }
+
+        function drawLandmarks(ctx, landmarks, options) {
+            ctx.fillStyle = options.color;
+            for (const landmark of landmarks) {
+                ctx.beginPath();
+                ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, options.lineWidth * 2, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+
+    </script>
+</body>
+</html>

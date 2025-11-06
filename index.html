@@ -3,201 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ASL Recognition</title>
+    <title>ASL Keypoint Recognition</title>
+    <!-- 1. Tailwind CSS for UI -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <style>
-        /* Custom styles for the confidence bar */
-        #confidence-bar {
-            width: 100%;
-            background-color: #4a5568; /* gray-700 */
-            border-radius: 0.5rem;
-            overflow: hidden;
-        }
-        #confidence-fill {
-            height: 1.5rem;
-            background-color: #48bb78; /* green-500 */
-            border-radius: 0.5rem;
-            transition: width 0.2s ease-in-out;
-        }
+        /* 2. Import Google Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        
+        /* 3. Style for the hand skeleton */
+        .hand-landmark { fill: #FF0000; stroke: #FFFFFF; stroke-width: 4px; }
+        .hand-connection { stroke: #00FF00; stroke-width: 6px; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 flex flex-col items-center justify-center min-h-screen font-sans p-4">
+<body class="bg-gray-900 text-gray-100 flex flex-col md:flex-row items-center justify-center min-h-screen p-4 md:p-8">
 
-    <div class="w-full max-w-6xl mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-2">ASL Recognition</h1>
-        <p id="loading-text" class="text-center text-lg text-yellow-400 mb-4">Loading Models...</p>
-
-        <div class="flex justify-center space-x-4 mb-4">
-            <button id="start-btn" class="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 disabled:opacity-50" disabled>Start Camera</button>
-            <button id="stop-btn" class="px-6 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75 hidden">Stop Camera</button>
+    <!-- Left Column: Video Feed & Title -->
+    <div class="w-full max-w-3xl md:mr-8">
+        <h1 class="text-3xl md:text-4xl font-bold text-center text-cyan-400 mb-4">ASL Alphabet Recognition</h1>
+        
+        <!-- Loading State -->
+        <div id="loading-container" class="flex flex-col items-center justify-center bg-gray-800 rounded-2xl shadow-xl h-96">
+            <div class="text-2xl font-semibold text-gray-300" id="loading-text">Initializing Hand Tracker...</div>
+            <div class="mt-4 w-12 h-12 border-4 border-t-cyan-400 border-gray-600 rounded-full animate-spin"></div>
+            <div id="server-status" class="text-lg text-yellow-400 mt-4">Waiting for server...</div>
         </div>
 
-        <div class="flex flex-col md:flex-row justify-center items-start gap-8">
-            <!-- Video Feed -->
-            <div id="live-view" class="relative hidden w-full md:w-1/2 max-w-2xl mx-auto">
-                <video id="webcam" class="w-full h-auto rounded-lg" autoplay playsinline></video>
-                <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full"></canvas>
-            </div>
+        <!-- Video Container -->
+        <div id="video-container" class="relative rounded-2xl overflow-hidden shadow-xl hidden" style="aspect-ratio: 4/3;">
+            <video id="webcam" class="w-full h-full object-cover transform -scale-x-100" autoplay playsinline></video>
+            <canvas id="output-canvas" class="absolute top-0 left-0 w-full h-full transform -scale-x-100"></canvas>
+        </div>
+         <div class="flex justify-center space-x-4 mt-4">
+            <button id="start-btn" class="px-6 py-3 bg-cyan-500 text-gray-900 font-bold rounded-lg shadow-lg hover:bg-cyan-400 transition duration-300" disabled>Start Camera</button>
+            <button id="stop-btn" class="px-6 py-3 bg-gray-600 text-white font-bold rounded-lg shadow-lg hover:bg-gray-500 transition duration-300 hidden">Stop Camera</button>
+        </div>
+    </div>
 
-            <!-- Prediction Area -->
-            <div class="w-full md:w-1/2 flex flex-col items-center justify-center text-center bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-2xl font-semibold mb-4">Prediction</h2>
-                <div id="prediction-text" class="text-8xl font-bold text-teal-300 h-28">---</div>
-                <div class="w-full mt-4">
-                    <p class="text-lg mb-2">Confidence</p>
-                    <div id="confidence-bar">
-                        <div id="confidence-fill" style="width: 0%;"></div>
-                    </div>
-                </div>
+    <!-- Right Column: Prediction Output -->
+    <div class="w-full max-w-xs md:max-w-sm mt-6 md:mt-0">
+        <div class="bg-gray-800 rounded-2xl shadow-xl p-6 text-center">
+            <div class="text-lg font-semibold text-gray-400 mb-2">PREDICTION</div>
+            <div id="prediction-text" class="text-8xl md:text-9xl font-black text-cyan-400 h-28 md:h-32 flex items-center justify-center">
+                ---
+            </div>
+            <div class="text-sm text-gray-500 mt-2">Confidence</div>
+            <div id="confidence-bar" class="w-full bg-gray-700 rounded-full h-2.5 mt-1">
+                <div id="confidence-fill" class="bg-cyan-400 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
             </div>
         </div>
     </div>
 
+    <!-- Main Application Logic -->
     <script type="module">
-        import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/dist/vision_bundle.js";
+        // --- FIX: Corrected the import path to the stable CDN endpoint ---
+        import { HandLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js";
 
         // --- DOM Elements ---
         const video = document.getElementById("webcam");
         const canvas = document.getElementById("output-canvas");
         const ctx = canvas.getContext("2d");
-        const startBtn = document.getElementById("start-btn");
-        const stopBtn = document.getElementById("stop-btn");
         const loadingText = document.getElementById("loading-text");
-        const liveView = document.getElementById("live-view");
+        const serverStatus = document.getElementById("server-status");
+        const videoContainer = document.getElementById("video-container");
+        const loadingContainer = document.getElementById("loading-container");
         const predictionText = document.getElementById("prediction-text");
         const confidenceFill = document.getElementById("confidence-fill");
+        const startBtn = document.getElementById("start-btn");
+        const stopBtn = document.getElementById("stop-btn");
 
-        // --- Global Variables ---
+        // --- Globals ---
+        const FLASK_SERVER_URL = "http://127.0.0.1:5000/predict";
         let handLandmarker;
-        let classifier;
-        let predictLoopId;
+        let predictionBuffer = [];
+        const SMOOTHING_BUFFER_SIZE = 10;
+        let predictLoopId; // Use this to control the requestAnimationFrame loop
+        let drawingUtils; // To draw the hand
 
-        // --- Main Initialization ---
-        async function main() {
-            loadingText.innerText = "Loading Classifier...";
-            await loadClassifier();
-            
-            loadingText.innerText = "Loading Hand Landmarker...";
-            await createHandLandmarker();
-
-            loadingText.innerText = "Ready";
-            startBtn.disabled = false;
-        }
-
-        async function createHandLandmarker() {
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-            );
-            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                    delegate: "GPU",
-                },
-                runningMode: "VIDEO",
-                numHands: 1,
-            });
-        }
-
-        async function loadClassifier() {
-            try {
-                const response = await fetch('./asl_classifier_model.json');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${'''response.status'''}`);
-                }
-                classifier = await response.json();
-            } catch (error) {
-                console.error("Failed to load classifier:", error);
-                loadingText.innerText = "Error: Could not load classifier model.";
-            }
-        }
-        
-        // --- Webcam & Prediction Loop ---
-        async function startWebcam() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert("Your browser does not support webcam access.");
-                return;
-            }
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                video.addEventListener("loadeddata", () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    liveView.classList.remove("hidden");
-                    startBtn.classList.add("hidden");
-                    stopBtn.classList.remove("hidden");
-                    predictWebcam();
-                });
-            } catch (error) {
-                console.error("Error accessing webcam:", error);
-                alert("Could not access webcam. Please grant permission and try again.");
-            }
-        }
-
-        function stopWebcam() {
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-            }
-            video.srcObject = null;
-            cancelAnimationFrame(predictLoopId);
-            
-            liveView.classList.add("hidden");
-            stopBtn.classList.add("hidden");
-            startBtn.classList.remove("hidden");
-            predictionText.innerText = "---";
-            confidenceFill.style.width = "0%";
-            predictionBuffer.length = 0; // Clear buffer
-        }
-
-        async function predictWebcam() {
-            if (video.readyState < 2) {
-                predictLoopId = requestAnimationFrame(predictWebcam);
-                return;
-            }
-            
-            const results = handLandmarker.detectForVideo(video, performance.now());
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            if (results.landmarks && results.landmarks.length > 0) {
-                const landmarks = results.landmarks[0];
-                drawConnectors(ctx, landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 5 });
-                drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 2 });
-                
-                const features = normalizeLandmarks(landmarks);
-                if (features) {
-                    const { prediction, confidence } = predictWithRF(features);
-                    const smoothedPrediction = applySmoothing(prediction);
-                    
-                    predictionText.innerText = smoothedPrediction;
-                    if (smoothedPrediction === "---") {
-                        confidenceFill.style.width = "0%";
-                    } else {
-                        // Display confidence of the last *valid* prediction
-                        confidenceFill.style.width = `${'''Math.round(confidence * 100)'''}%`;
-                    }
-                } else {
-                     const smoothedPrediction = applySmoothing(null);
-                     predictionText.innerText = smoothedPrediction;
-                     confidenceFill.style.width = "0%";
-                }
-            } else {
-                const smoothedPrediction = applySmoothing(null);
-                predictionText.innerText = smoothedPrediction;
-                confidenceFill.style.width = "0%";
-            }
-
-            predictLoopId = requestAnimationFrame(predictWebcam);
-        }
-
-        // --- Event Listeners ---
-        startBtn.addEventListener("click", startWebcam);
-        stopBtn.addEventListener("click", stopWebcam);
-        window.addEventListener("load", main);
-
-
-        // --- Helper Functions ---
-
-        // 1. Normalization Logic
+        // --- Helper: Normalize Keypoints (Python Logic) ---
         function normalizeLandmarks(landmarks) {
             let coords = [];
             for (const landmark of landmarks) {
@@ -221,64 +106,18 @@
             for (let i = 0; i < 63; i++) {
                 coords[i] /= scaleFactor;
             }
-            
-            return coords; // Return the 63-element flat array
+            return Array.from(coords); // Convert to simple array for JSON
         }
-
-        // 2. Random Forest Prediction Logic
-        function predictWithRF(features) {
-            const totalVotes = new Array(classifier.n_classes).fill(0);
-            
-            const argmax = (arr) => {
-                if (arr.length === 0) return -1;
-                let max = arr[0];
-                let maxIndex = 0;
-                for (let i = 1; i < arr.length; i++) {
-                    if (arr[i] > max) {
-                        maxIndex = i;
-                        max = arr[i];
-                    }
-                }
-                return maxIndex;
-            };
-
-            for (const tree of classifier.trees) {
-                let nodeIndex = 0;
-                while (tree.children_left[nodeIndex] !== -1) { // -1 indicates a leaf
-                    const featureIndex = tree.feature[nodeIndex];
-                    const threshold = tree.threshold[nodeIndex];
-                    if (features[featureIndex] <= threshold) {
-                        nodeIndex = tree.children_left[nodeIndex];
-                    } else {
-                        nodeIndex = tree.children_right[nodeIndex];
-                    }
-                }
-                const leafVotes = tree.value[nodeIndex][0];
-                const winningClassIndex = argmax(leafVotes);
-                totalVotes[winningClassIndex]++;
-            }
-
-            const finalPredictionIndex = argmax(totalVotes);
-            const prediction = classifier.classes[finalPredictionIndex];
-            const confidence = totalVotes[finalPredictionIndex] / classifier.trees.length;
-            
-            return { prediction, confidence };
-        }
-
-        // 3. Smoothing Logic
-        const SMOOTHING_BUFFER_SIZE = 10;
-        const predictionBuffer = [];
-
+        
+        // --- Helper: Smoothing Logic ---
         function applySmoothing(prediction) {
             predictionBuffer.push(prediction);
             if (predictionBuffer.length > SMOOTHING_BUFFER_SIZE) {
-                predictionBuffer.shift(); // Remove oldest
+                predictionBuffer.shift(); 
             }
-            
             const counts = {};
             let maxCount = 0;
             let mode = "---";
-            
             for (const pred of predictionBuffer) {
                 if (pred === null) continue;
                 counts[pred] = (counts[pred] || 0) + 1;
@@ -290,30 +129,161 @@
             return mode;
         }
 
-        // --- MediaPipe Drawing Utils (for canvas visualization) ---
-        // These functions are not part of the core logic but are needed to draw the hand.
-        function drawConnectors(ctx, landmarks, connections, options) {
-            ctx.beginPath();
-            ctx.strokeStyle = options.color;
-            ctx.lineWidth = options.lineWidth;
-            for (const connection of connections) {
-                const start = landmarks[connection[0]];
-                const end = landmarks[connection[1]];
-                ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
-                ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
+        // --- Main Prediction Loop ---
+        async function predictWebcam() {
+            if (!video.srcObject) {
+                 // Stop loop if video is off
+                return;
             }
-            ctx.stroke();
+
+            const startTimeMs = performance.now();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Ensure handLandmarker is ready before detecting
+            if (handLandmarker) {
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+
+                let smoothedPrediction = "---";
+                let confidence = 0;
+
+                if (results.landmarks && results.landmarks.length > 0) {
+                    const landmarks = results.landmarks[0];
+                    
+                    // Draw skeleton
+                    drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 6 });
+                    drawingUtils.drawLandmarks(landmarks, { color: '#FF0000', lineWidth: 4 });
+                    
+                    const features = normalizeLandmarks(landmarks);
+                    
+                    if (features) {
+                        // *** Send features to Python server ***
+                        try {
+                            const response = await fetch(FLASK_SERVER_URL, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ features: features })
+                            });
+                            if (response.ok) {
+                                const res = await response.json();
+                                confidence = res.confidence;
+                                smoothedPrediction = applySmoothing(res.prediction);
+                            } else {
+                               smoothedPrediction = applySmoothing(null); 
+                            }
+                        } catch (e) {
+                             smoothedPrediction = applySmoothing(null);
+                             // If server is down, show it
+                             serverStatus.textContent = "Server Connection Lost!";
+                             serverStatus.classList.remove("text-green-400");
+                             serverStatus.classList.add("text-red-500");
+                        }
+                    }
+                } else {
+                    smoothedPrediction = applySmoothing(null);
+                }
+
+                predictionText.textContent = smoothedPrediction;
+                confidenceFill.style.width = `${confidence * 100}%`;
+            }
+            
+            // Keep the loop going
+            predictLoopId = window.requestAnimationFrame(predictWebcam);
+        }
+        
+        // --- Setup Functions ---
+        startBtn.addEventListener('click', async () => {
+            loadingText.textContent = "Starting camera...";
+            videoContainer.classList.remove("hidden");
+            loadingContainer.classList.add("hidden");
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    startBtn.classList.add("hidden");
+                    stopBtn.classList.remove("hidden");
+                    // Start the prediction loop
+                    predictWebcam();
+                };
+            } catch (err) {
+                console.error("Error starting webcam:", err);
+                loadingText.textContent = "Error: Webcam access denied.";
+                videoContainer.classList.add("hidden");
+                loadingContainer.classList.remove("hidden");
+            }
+        });
+        
+        stopBtn.addEventListener('click', () => {
+            if (predictLoopId) {
+                window.cancelAnimationFrame(predictLoopId);
+                predictLoopId = null;
+            }
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            videoContainer.classList.add("hidden");
+            loadingContainer.classList.remove("hidden");
+            loadingText.textContent = "Camera off. Ready to start.";
+            predictionText.textContent = "---";
+            confidenceFill.style.width = "0%";
+            startBtn.classList.remove("hidden");
+            stopBtn.classList.add("hidden");
+        });
+
+        async function main() {
+            // 1. Check if Python server is running
+            try {
+                // --- FIX: Ping the root URL, not the /predict endpoint ---
+                await fetch("http://127.0.0.1:5000/"); 
+                serverStatus.textContent = "Server Connected!";
+                serverStatus.classList.remove("text-yellow-400");
+                serverStatus.classList.add("text-green-400");
+            } catch(e) {
+                serverStatus.textContent = "Error: Python server is not running!";
+                serverStatus.classList.remove("text-yellow-400");
+                serverStatus.classList.add("text-red-500");
+                loadingText.textContent = "Please run 'python app.py' first.";
+                return;
+            }
+
+            // 2. Create Hand Landmarker
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                );
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU",
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1,
+                    minHandDetectionConfidence: 0.7, // Higher confidence for detection
+                    minHandTrackingConfidence: 0.5
+                });
+                
+                // Init the drawing utility
+                drawingUtils = new DrawingUtils(ctx);
+                
+                loadingText.textContent = "Ready to Start!";
+                startBtn.disabled = false;
+            } catch (e) {
+                console.error("Error creating Hand Landmarker:", e);
+                loadingText.textContent = "Error loading MediaPipe model.";
+                serverStatus.textContent = "Page reload required.";
+                serverStatus.classList.add("text-red-500");
+            }
         }
 
-        function drawLandmarks(ctx, landmarks, options) {
-            ctx.fillStyle = options.color;
-            for (const landmark of landmarks) {
-                ctx.beginPath();
-                ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, options.lineWidth * 2, 0, 2 * Math.PI);
-                ctx.fill();
-            }
-        }
-
+        // Start the main setup process
+        main();
     </script>
 </body>
 </html>

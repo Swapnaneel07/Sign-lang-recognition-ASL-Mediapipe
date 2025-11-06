@@ -183,10 +183,4 @@ This project uses MediaPipe (Google) for keypoint detection and (optionally) Ten
 
 ---
 
-If you'd like, I can also:
 
-- add run scripts for Windows PowerShell to simplify commands,
-- add a short demo GIF or screenshots, or
-- extend `train_classifier.py` with a small evaluation report and save it to `reports/`.
-
-Tell me which addition you'd prefer and I will update the repo accordingly.

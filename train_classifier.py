@@ -1,7 +1,8 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 import pickle
 import os
 
@@ -39,6 +40,41 @@ def train_model():
     
     print(f"\nTraining Complete.")
     print(f"Validation Accuracy: {accuracy * 100:.2f}%")
+
+    # --- Create reports directory and save evaluation artifacts ---
+    reports_dir = 'reports'
+    os.makedirs(reports_dir, exist_ok=True)
+
+    # 1) Text report with accuracy and classification report
+    cls_report = classification_report(y_test, y_pred)
+    report_text = (
+        f"Validation Accuracy: {accuracy * 100:.2f}%\n\n"
+        f"Classification Report:\n{cls_report}\n"
+    )
+    report_path = os.path.join(reports_dir, 'evaluation_report.txt')
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report_text)
+
+    # 2) Confusion matrix image
+    cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    disp.plot(ax=ax, cmap='Blues', colorbar=True)
+    plt.title('Confusion Matrix')
+    cm_path = os.path.join(reports_dir, 'confusion_matrix.png')
+    fig.savefig(cm_path, bbox_inches='tight')
+    plt.close(fig)
+
+    # 3) Save raw predictions for further analysis
+    preds_df = X_test.copy()
+    preds_df['y_true'] = y_test.values
+    preds_df['y_pred'] = y_pred
+    preds_csv = os.path.join(reports_dir, 'predictions.csv')
+    preds_df.to_csv(preds_csv, index=False)
+
+    print(f"Saved evaluation report to {report_path}")
+    print(f"Saved confusion matrix to {cm_path}")
+    print(f"Saved predictions CSV to {preds_csv}")
 
     # 5. Save the Model
     with open(OUTPUT_MODEL_FILE, 'wb') as file:

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ASL Classifier - Evaluation Report</title>
+  <style>
+    body {font-family: Arial, sans-serif; max-width:900px; margin:2rem auto; padding:1rem; color:#222}
+    header {display:flex;align-items:center;gap:1rem}
+    pre {background:#f7f7f7;border:1px solid #eee;padding:1rem;overflow:auto}
+    img {max-width:100%;height:auto;border:1px solid #ddd;padding:6px;background:#fff}
+    .file-list {margin:1rem 0}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ASL Classifier — Evaluation Report</h1>
+  </header>
+
+  <section class="file-list">
+    <p>The training script writes these files to this folder (<code>reports/</code>):</p>
+    <ul>
+      <li><code>evaluation_report.txt</code> — text summary with accuracy and classification report.</li>
+      <li><code>confusion_matrix.png</code> — confusion matrix visualization.</li>
+      <li><code>predictions.csv</code> — test set features with <code>y_true</code> and <code>y_pred</code>.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Confusion Matrix</h2>
+    <p>If present, this image shows how predicted classes compare to true labels:</p>
+    <img src="confusion_matrix.png" alt="Confusion Matrix">
+  </section>
+
+  <section>
+    <h2>Classification Report</h2>
+    <p>If available, the text report is shown below:</p>
+    <pre id="report">Loading evaluation_report.txt ...</pre>
+  </section>
+
+  <script>
+    // Try to load the text report via fetch (works when served or opened in browsers that allow file fetch).
+    fetch('evaluation_report.txt').then(r => {
+      if (!r.ok) throw new Error('Report not found');
+      return r.text();
+    }).then(txt => {
+      document.getElementById('report').textContent = txt;
+    }).catch(() => {
+      document.getElementById('report').textContent = 'evaluation_report.txt not found. Run the training script to generate reports.';
+    });
+  </script>
+</body>
+</html>
